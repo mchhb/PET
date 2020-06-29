@@ -82,8 +82,8 @@ typedef union u8_u us8_t;
 
 /************************/
 // unit is 1ms
-#define T2_MS_ARRAY_NUM  		16
-#define T2_TIMEOUT_MAXIMUM		150000
+#define T2_MS_ARRAY_NUM  		19
+#define T2_TIMEOUT_MAXIMUM		350000
 
 #define T2_COUNTER_MS_200			0
 #define T2_COUNTER_MS_500			1
@@ -100,7 +100,10 @@ typedef union u8_u us8_t;
 #define T2_COUNTER_S_8				12
 #define T2_COUNTER_S_35				13
 #define T2_COUNTER_S_15				14
-#define T2_COUNTER_S_120			15
+#define T2_COUNTER_S_2_300			15
+#define T2_COUNTER_S_300			16
+#define T2_COUNTER_S_2_60			17
+#define T2_COUNTER_S_2_30			18
 
 #define T2_TIMEOUT_MS_200			200
 #define T2_TIMEOUT_MS_500			500
@@ -108,6 +111,7 @@ typedef union u8_u us8_t;
 #define T2_TIMEOUT_S_2				2000
 #define T2_TIMEOUT_S_5				5000
 #define T2_TIMEOUT_S_10				10000
+
 #define T2_TIMEOUT_S_20				20000
 #define T2_TIMEOUT_S_9				9000
 #define T2_TIMEOUT_S_60				60000
@@ -117,7 +121,10 @@ typedef union u8_u us8_t;
 #define T2_TIMEOUT_S_8				8000
 #define T2_TIMEOUT_S_35				35000
 #define T2_TIMEOUT_S_15				15000
-#define T2_TIMEOUT_S_120			120000
+#define T2_TIMEOUT_S_2_300		300000
+#define T2_TIMEOUT_S_300			300000
+#define T2_TIMEOUT_S_2_60			60000
+#define T2_TIMEOUT_S_2_30			30000
 /************************/
 
 /************************/

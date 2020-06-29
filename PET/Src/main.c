@@ -118,8 +118,13 @@ uint8_t alarm_start = 0;
 uint8_t net_work = 1;
 uint8_t alarm_times = 0;
 uint8_t auto_fooh = 5;
+uint8_t auto_water = 5;
 uint8_t net_check = 0;
 uint8_t heart_check = 0;
+uint8_t chui_value = 0;
+uint8_t chui_step = 0;
+uint8_t chui_times = 0;
+uint8_t noise_alarm = 0;
 uint8_t Auto_CleanOut(void);
 /************************/
 
@@ -195,6 +200,7 @@ void OPEN_DOOR(void);
 void test_relay(void);
 void C322_CONFIG_Init(void);
 void SoftReset(void);
+void chuifengji(void);
 /* USER CODE END 0 */
 
 /**
@@ -263,6 +269,7 @@ int main(void)
 		USR_C322_ACTION();
 		Heart_Beat();
 		Auto_CleanOut();
+		chuifengji();
   }
   /* USER CODE END 3 */
 }
@@ -365,7 +372,7 @@ void C322_CONFIG_Init(void)
 				net_check = 0;
 				printf("未收到心跳回复，网络断开。\r\n");
 			}
-			if((heart_check >= 3) && (test_c322_value != 1))
+			if((heart_check >= 3) && (test_c322_value != 1) &&(driver.mode != 0x02))
 			{
 				SoftReset();
 			}
@@ -732,7 +739,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   */
 void HC_SR505_Status(void)
 {
-	if((READ_LIMIT_SWITCH == 0x00) && (driver.step == 1))
+	if((READ_LIMIT_SWITCH == 0x00) && (driver.step == 1) && (auto_clean == 0x00) && (driver.mode != 0x02))
 	{
 				driver.step = 0x02;
 				t2_count_ms[T2_COUNTER_S_10] = 0;
@@ -778,15 +785,16 @@ void HC_SR505_Status(void)
 			t2_count_ms[T2_COUNTER_MS_1500] = 0;
 			work_fault.BIT1 = 1;
 		}
-		if((driver.mode == 0x02) &&((READ_HC_SR505_OUT1 == 0x01) || (READ_HC_SR505_OUT2 == 0x01)))
-		{
-			//OPEN_DOOR();
-			auto_clean = 0xff;
-			meep_status = MEEP_SHORT_TIME;
-			t2_count_ms[T2_COUNTER_MS_1500] = 0;
-			work_fault.BIT2 = 1;
-			printf("强制清洗过程中检测到有宠物，发送报警。\r\n");
-		}
+//		if((driver.mode == 0x02) &&((READ_HC_SR505_OUT1 == 0x01) || (READ_HC_SR505_OUT2 == 0x01)) && (auto_clean != 0x00))
+//		{
+//			//OPEN_DOOR();
+//			auto_clean = 0x00;
+//			t2_count_ms[T2_COUNTER_S_20] = 0;
+//			meep_status = MEEP_SHORT_TIME;
+//			t2_count_ms[T2_COUNTER_MS_1500] = 0;
+//			work_fault.BIT2 = 1;
+//			printf("强制清洗过程中检测到有宠物，发送报警。\r\n");
+//		}
 	}
 }
 /**
@@ -813,6 +821,12 @@ uint8_t Noise_Status(void)
 	if((t2_count_ms[T2_COUNTER_S_6] > T2_TIMEOUT_S_6)&&(usr_c322 >= USR_C322_ENTM_OK))
 	{
 		t2_count_ms[T2_COUNTER_S_6] = 0;
+		noise_alarm++;
+		if((noise_alarm > 3)&&(noise_num < 2))
+		{
+			noise_alarm = 0;
+			noise_num = 0;
+		}
 		HAL_UART_Transmit(&huart2, (uint8_t *)Noise_SendData,sizeof(Noise_SendData), UART_Transmit_Timeout);
 	}
 	if(Uart2.ReceiveSuccess_Flag == True)
@@ -822,7 +836,7 @@ uint8_t Noise_Status(void)
 		memset(Uart2.RxBuff,0x00,sizeof(Uart2.RxBuff)); 
 		//printf("Noise db is %03d\r\n",Noise_db);
 	}
-	if(Noise_db >= NOISE_ALARM)
+	if((Noise_db >= NOISE_ALARM) && (driver.mode != 0x02))
 	{
 		noise_num++;
 		if(noise_num >= 2)
@@ -838,6 +852,8 @@ uint8_t Noise_Status(void)
 			{
 				HAL_UART_Transmit(&huart1, Alarm_Data,sizeof(Alarm_Data), UART_Transmit_Timeout);
 				printf("噪声报警。\r\n");
+				noise_num = 0;
+				Noise_db = 0;
 			}
 		}
 	}
@@ -943,7 +959,7 @@ uint8_t Auto_CleanOut(void)
 {
 	if((driver.mode == 0x02) && (auto_clean == 0x00))
 	{
-		if((t2_count_ms[T2_COUNTER_S_20] >= T2_TIMEOUT_S_20))
+		if(t2_count_ms[T2_COUNTER_S_20] >= T2_TIMEOUT_S_20)
 		{
 			if((READ_LIMIT_SWITCH != 0x00) || (READ_HC_SR505_OUT1 != 0) || (READ_HC_SR505_OUT2 != 0))
 			{
@@ -952,20 +968,69 @@ uint8_t Auto_CleanOut(void)
 				meep_status = MEEP_SHORT_TIME;
 				driver.step = 0xff;
 				printf("开始强制清洗过程中，门未关或检测到有宠物，报警提示。\r\n");
+				
 				work_fault.BIT2 = 1;
 			}
 			else
 			{
+				auto_clean++;
 				driver.step = 0x03;
 				work_fault.BIT2 = 0;
 				printf("开始强制清洗过程中，延时20秒后，检测无宠物、门关闭，可继续工作。\r\n");
 			}
 		}
+	}
 //		else
 //		{
-			if((READ_LIMIT_SWITCH == 0x00) && (READ_HC_SR505_OUT1 == 0) && (READ_HC_SR505_OUT2 == 0) && (driver.step == 3))
+			if((READ_LIMIT_SWITCH == 0x00) && (READ_HC_SR505_OUT1 == 0) && (READ_HC_SR505_OUT2 == 0) && (driver.step == 3)&&(driver.mode == 0x02))
+			{
+				driver.step = 4;
+				auto_clean++;
+				t2_count_ms[T2_COUNTER_S_2_30] = 0;
+					printf("开始强制清洗过程中，开喂水阀. 打开时间30秒。\r\n");
+					if(READ_RELAY3 == False)
+					{
+						START_RELAY3;
+						Delay_ms(500);
+						if(READ_RELAY3 == True)
+						{
+							t2_count_ms[T2_COUNTER_S_15] = 0;
+							work_fault.BIT3 = 0;
+							Uart1.TxBuffer[7] = 0x01;
+						}
+						else
+						{
+							printf("喂水阀故障。\r\n");
+							work_fault.BIT3 = 1;
+							CLOSE_RELAY3;
+							Uart1.TxBuffer[7] = 0x00;
+						}
+					}
+					else
+					{
+						printf("喂水阀在打开状态。\r\n");
+						work_fault.BIT3 = 0;
+						Uart1.TxBuffer[7] = 0x02;
+					}
+			}
+			else if((driver.step == 4)&&(t2_count_ms[T2_COUNTER_S_2_30] >= T2_TIMEOUT_S_2_30))
 			{
 				printf("开始强制清洗，步骤二。\r\n");
+				printf("开始强制清洗过程中，关喂水阀指令。\r\n");
+				CLOSE_RELAY3;
+				Delay_ms(500);
+				if(READ_RELAY3 == True)
+				{
+					printf("关喂水阀故障。\r\n");
+					work_fault.BIT3 = 1;
+					Uart1.TxBuffer[7] = 0x01;
+				}
+				else 
+				{
+					printf("喂水阀在关状态。\r\n");
+					work_fault.BIT3 = 0;
+					Uart1.TxBuffer[7] = 0x00;
+				}
 				meep_status = MEEP_CLOSE;
 				auto_clean_step++;
 				auto_clean++;
@@ -985,6 +1050,7 @@ uint8_t Auto_CleanOut(void)
 				{
 					printf("开始强制清洗过程中，打开清洗泵失败。\r\n");
 					work_fault.BIT6 = 1;
+					CLOSE_RELAY6;
 				}
 				if(READ_RELAY5 == True)
 				{
@@ -995,14 +1061,13 @@ uint8_t Auto_CleanOut(void)
 				{
 					work_fault.BIT5 = 1;
 					printf("开始强制清洗过程中，打开雨刷电机失败。\r\n");
+					CLOSE_RELAY5;
 				}
 			}
-	//	}
-	}
 	else if((auto_clean_step == 0x01) && (t2_count_ms[T2_COUNTER_S_30] >= T2_TIMEOUT_S_30))
 	{
 		printf("开始强制清洗过程中，步骤三。\r\n");
-		printf("开始强制清洗过程中，到30秒，关闭雨刷电机，清洗泵在打开10秒。\r\n");
+		printf("开始强制清洗过程中，到30秒，关闭雨刷电机，清洗泵在打开xx秒。\r\n");
 		auto_clean_step++;
 		CLOSE_RELAY5;
 		Delay_ms(500);
@@ -1019,6 +1084,7 @@ uint8_t Auto_CleanOut(void)
 		}
 		t2_count_ms[T2_COUNTER_S_10] = 0;
 	}
+	//else if((auto_clean_step == 0x02) && (t2_count_ms[T2_COUNTER_S_10] >= T2_TIMEOUT_S_10))
 	else if((auto_clean_step == 0x02) && (t2_count_ms[T2_COUNTER_S_10] >= T2_TIMEOUT_S_10))
 	{
 		printf("开始强制清洗过程中，步骤四\r\n");
@@ -1047,38 +1113,48 @@ uint8_t Auto_CleanOut(void)
 		Delay_ms(1000);
 		if(READ_RELAY7 == True)
 		{
+			chui_value = 1;
+			chui_times = 0;
+			chui_step = 0;
+			t2_count_ms[T2_COUNTER_S_300] = 0;
 			printf("开始强制清洗过程中，打开吹风机成功。\r\n");
 			work_fault.BIT7 = 0;
 		}
 		else 
 		{
+			CLOSE_RELAY7;
 			printf("开始强制清洗过程中，打开吹风机失败。\r\n");
 			work_fault.BIT7 = 1;
 		}
 		t2_count_ms[T2_COUNTER_S_60] = 0;
 	}
-	else if((auto_clean_step == 0x04) && (t2_count_ms[T2_COUNTER_S_60] >= T2_TIMEOUT_S_60))
+	//else if((auto_clean_step == 0x04) && (t2_count_ms[T2_COUNTER_S_60] >= T2_TIMEOUT_S_60))
+	else if((auto_clean_step == 0x04) && (chui_value == 2))
 	{
 		printf("开始强制清洗过程中，步骤六。\r\n");
 		auto_clean_step++;
-		CLOSE_RELAY7;
-		printf("开始强制清洗过程中，到60秒，关闭吹风机。\r\n");
-		Delay_ms(500);
-		if(READ_RELAY7 == False)
-		{
-			printf("开始强制清洗过程中，关闭吹风机成功。\r\n");
-			work_fault.BIT7 = 0;
-		}
-		else 
-		{
-			printf("开始强制清洗过程中，关闭吹风机失败。\r\n");
-			work_fault.BIT7 = 1;
-		}
+		printf("开始强制清洗过程中，到XX秒，关闭吹风机。\r\n");
+		chui_value = 0;
+		chui_times = 0;
+		chui_step = 0;
+//		CLOSE_RELAY7;
+//		printf("开始强制清洗过程中，到60秒，关闭吹风机。\r\n");
+//		Delay_ms(500);
+//		if(READ_RELAY7 == False)
+//		{
+//			printf("开始强制清洗过程中，关闭吹风机成功。\r\n");
+//			work_fault.BIT7 = 0;
+//		}
+//		else 
+//		{
+//			printf("开始强制清洗过程中，关闭吹风机失败。\r\n");
+//			work_fault.BIT7 = 1;
+//		}
 		START_RELAY10;
-		printf("开始强制清洗过程中，打开紫外线消毒灯，打开时间120秒。\r\n");
-		t2_count_ms[T2_COUNTER_S_120] = 0;
+		printf("开始强制清洗过程中，打开紫外线消毒灯，打开时间300秒。\r\n");
+		t2_count_ms[T2_COUNTER_S_2_300] = 0;
 	}
-	else if((auto_clean_step == 0x05) && (t2_count_ms[T2_COUNTER_S_120] >= T2_TIMEOUT_S_120))
+	else if((auto_clean_step == 0x05) && (t2_count_ms[T2_COUNTER_S_2_300] >= T2_TIMEOUT_S_2_300))
 	{
 		printf("开始强制清洗过程中，步骤七。\r\n");
 		auto_clean_step = 0x00;
@@ -1206,6 +1282,7 @@ void USR_C322_ACTION(void)
 						}
 						else
 						{
+							CLOSE_RELAY2;
 							printf("柜门灯故障。\r\n");
 							Uart1.TxBuffer[7] = 0x00;
 						}
@@ -1245,20 +1322,21 @@ void USR_C322_ACTION(void)
 						{
 							auto_fooh = 0x01;
 							t2_count_ms[T2_COUNTER_S_15] = 0;
-							work_fault.BIT4 = 0;
+							work_fault.BIT3 = 0;
 							Uart1.TxBuffer[7] = 0x01;
 						}
 						else
 						{
 							printf("喂水阀故障。\r\n");
-							work_fault.BIT4 = 1;
+							work_fault.BIT3 = 1;
+							CLOSE_RELAY3;
 							Uart1.TxBuffer[7] = 0x00;
 						}
 					}
 					else
 					{
 						printf("喂水阀在打开状态。\r\n");
-						work_fault.BIT4 = 0;
+						work_fault.BIT3 = 0;
 						Uart1.TxBuffer[7] = 0x02;
 					}
 				}
@@ -1270,13 +1348,13 @@ void USR_C322_ACTION(void)
 					if(READ_RELAY3 == True)
 					{
 						printf("关喂水阀故障。\r\n");
-						work_fault.BIT4 = 1;
+						work_fault.BIT3 = 1;
 						Uart1.TxBuffer[7] = 0x01;
 					}
 					else 
 					{
-						printf("喂水阀在打开状态。\r\n");
-						work_fault.BIT4 = 0;
+						printf("喂水阀在关状态。\r\n");
+						work_fault.BIT3 = 0;
 						Uart1.TxBuffer[7] = 0x00;
 					}
 				}
@@ -1293,14 +1371,15 @@ void USR_C322_ACTION(void)
 						if(READ_RELAY4 == True)
 						{
 							t2_count_ms[T2_COUNTER_S_10] = 0;
-							auto_fooh = 0x02;
-							work_fault.BIT5 = 0;
+							auto_water = 0x02;
+							work_fault.BIT4 = 0;
 							Uart1.TxBuffer[7] = 0x01;
 						}
 						else
 						{
 							printf("喂食阀故障。\r\n");
-							work_fault.BIT5 = 1;
+							work_fault.BIT4 = 1;
+							CLOSE_RELAY4;
 							Uart1.TxBuffer[7] = 0x00;
 						}
 					}
@@ -1318,12 +1397,12 @@ void USR_C322_ACTION(void)
 					if(READ_RELAY4 == True)
 					{
 						printf("关喂食阀故障。\r\n");
-						work_fault.BIT5 = 1;
+						work_fault.BIT4 = 1;
 						Uart1.TxBuffer[7] = 0x01;
 					}
 					else 
 					{
-						work_fault.BIT5 = 0;
+						work_fault.BIT4 = 0;
 						Uart1.TxBuffer[7] = 0x00;
 					}
 				}
@@ -1339,20 +1418,21 @@ void USR_C322_ACTION(void)
 						Delay_ms(1000);
 						if(READ_RELAY5 == True)
 						{
-							work_fault.BIT6 = 0;
+							work_fault.BIT5 = 0;
 							Uart1.TxBuffer[7] = 0x01;
 						}
 						else
 						{
 							printf("雨刷器故障。\r\n");
-							work_fault.BIT6 = 1;
+							work_fault.BIT5 = 1;
+							CLOSE_RELAY5;
 							Uart1.TxBuffer[7] = 0x00;
 						}
 					}
 					else
 					{
 						printf("雨刷器在打开状态。\r\n");
-						work_fault.BIT6 = 0;
+						work_fault.BIT5 = 0;
 						Uart1.TxBuffer[7] = 0x02;
 					}
 				}
@@ -1365,11 +1445,11 @@ void USR_C322_ACTION(void)
 					{
 						printf("关雨刷器故障。\r\n");
 						Uart1.TxBuffer[7] = 0x01;
-						work_fault.BIT6 = 1;
+						work_fault.BIT5 = 1;
 					}
 					else 
 					{
-						work_fault.BIT6 = 0;
+						work_fault.BIT5 = 0;
 						Uart1.TxBuffer[7] = 0x00;
 					}
 				}
@@ -1386,20 +1466,21 @@ void USR_C322_ACTION(void)
 						if(READ_RELAY6 == True)
 						{
 							
-							work_fault.BIT7 = 0;
+							work_fault.BIT6 = 0;
 							Uart1.TxBuffer[7] = 0x01;
 						}
 						else
 						{
 							printf("清洗泵故障。\r\n");
-							work_fault.BIT7 = 1;
+							work_fault.BIT6 = 1;
+							CLOSE_RELAY6;
 							Uart1.TxBuffer[7] = 0x00;
 						}
 					}
 					else
 					{
 						printf("清洗泵在打开状态。\r\n");
-						work_fault.BIT7 = 0;
+						work_fault.BIT6 = 0;
 						Uart1.TxBuffer[7] = 0x02;
 					}
 				}
@@ -1411,12 +1492,12 @@ void USR_C322_ACTION(void)
 					if(READ_RELAY6 == True)
 					{
 						printf("关清洗泵故障。\r\n");
-						work_fault.BIT7 = 0x01;
+						work_fault.BIT6 = 0x01;
 						Uart1.TxBuffer[7] = 0x01;
 					}
 					else 
 					{
-						work_fault.BIT7 = 0x00;
+						work_fault.BIT6 = 0x00;
 						Uart1.TxBuffer[7] = 0x00;
 					}
 				}
@@ -1433,20 +1514,31 @@ void USR_C322_ACTION(void)
 						if(READ_RELAY7 == True)
 						{
 							Uart1.TxBuffer[7] = 0x01;
+							work_fault.BIT7 = 0x00;
+							t2_count_ms[T2_COUNTER_S_300] = 0;
+							chui_value = 1;
+							chui_step = 0;
+							chui_times = 0;
 						}
 						else
 						{
 							printf("吹风机故障。\r\n");
 							Uart1.TxBuffer[7] = 0x00;
+							work_fault.BIT7 = 0x01;
+							CLOSE_RELAY7;
 						}
 					}
 					else
 					{
 						Uart1.TxBuffer[7] = 0x02;
+						work_fault.BIT7 = 0x00;
 					}
 				}
 				else
 				{
+					chui_value = 0;
+					chui_step = 0;
+					chui_times = 0;
 					printf("收到关吹风机指令。\r\n");
 					CLOSE_RELAY7;
 					Delay_ms(500);
@@ -1454,10 +1546,12 @@ void USR_C322_ACTION(void)
 					{
 						printf("关吹风机故障。\r\n");
 						Uart1.TxBuffer[7] = 0x01;
+						work_fault.BIT7 = 0x01;
 					}
 					else 
 					{
 						Uart1.TxBuffer[7] = 0x00;
+						work_fault.BIT7 = 0x00;
 					}
 				}
 				Uart1.TxBuffer[6] = 0x07;
@@ -1477,6 +1571,8 @@ void USR_C322_ACTION(void)
 						}
 						else
 						{
+							CLOSE_RELAY8;
+							CLOSE_RELAY9;
 							printf("换气扇故障。\r\n");
 							Uart1.TxBuffer[7] = 0x00;
 						}
@@ -1591,7 +1687,7 @@ void USR_C322_ACTION(void)
 							}
 					}
 				}
-				else if(Uart1.TxBuffer[7] == 0x00)
+				else if(Uart1.RxBuffer[7] == 0x00)
 				{
 						printf("停止工作。\r\n");
 						alarm_start = 0x03;//停止工作
@@ -1630,7 +1726,7 @@ void USR_C322_ACTION(void)
 							Uart1.TxBuffer[7] = 0x02;
 						}
 				}
-				Uart1.TxBuffer[6] = 0x0A;
+				Uart1.TxBuffer[6] = 0x0B;
 			break;
 			case 0x10:
 				printf("强制开门。\r\n");
@@ -1740,6 +1836,7 @@ void CHECK_STATUS(void)
 	{
 		CLOSE_RELAY2;
 		alarm_start = 0x00;
+		alarm_times = 0x00;
 		meep_status = MEEP_CLOSE;
 	}
 	if((door_status == 0) && ((alarm_start == 2)||(alarm_start == 3)))
@@ -1799,10 +1896,10 @@ void CHECK_STATUS(void)
 		CLOSE_RELAY3;
 		printf("停止喂水。\r\n");
 	}
-	if((auto_fooh == 0x02)&&(t2_count_ms[T2_COUNTER_S_10] > T2_TIMEOUT_S_10))
+	if((auto_water == 0x02)&&(t2_count_ms[T2_COUNTER_S_10] > T2_TIMEOUT_S_10))
 	{
 		t2_count_ms[T2_COUNTER_S_10] = 0;
-		auto_fooh = 0x00;
+		auto_water = 0x00;
 		CLOSE_RELAY4;
 		printf("停止喂食。\r\n");
 	}
@@ -1907,6 +2004,56 @@ void READ_WORKSTATUS(void)
 				meep_status = MEEP_SHORT_TIME;
 				t2_count_ms[T2_COUNTER_MS_1500] = 0;
 			}
+	}
+}
+
+void chuifengji(void)
+{
+	if( chui_value == 1)
+	{
+		if((chui_step == 0)&&(t2_count_ms[T2_COUNTER_S_300] > T2_TIMEOUT_S_300))
+		{
+			chui_times++;
+			printf("CF		:		 %d.\r\n",chui_times);
+			chui_step++;
+			CLOSE_RELAY7;
+			Delay_ms(500);
+			if(READ_RELAY7 == True)
+			{
+				printf("关吹风机故障。\r\n");
+				Uart1.TxBuffer[7] = 0x01;
+				work_fault.BIT7 = 0x01;
+			}
+			t2_count_ms[T2_COUNTER_S_2_60] = 0;
+			if(chui_times >= 3)
+			{
+				chui_step = 0xff;
+				chui_value = 2;
+				printf("Closed CF! \r\n");
+			}
+		}
+		else if((chui_step ==1)&&(t2_count_ms[T2_COUNTER_S_2_60] > T2_TIMEOUT_S_2_60))
+		{
+			chui_step = 0;
+			if(READ_RELAY7 == False)
+			{
+				START_RELAY7;
+				Delay_ms(1000);
+				if(READ_RELAY7 == True)
+				{
+					Uart1.TxBuffer[7] = 0x01;
+					work_fault.BIT7 = 0x00;
+				}
+				else
+				{
+					printf("吹风机故障。\r\n");
+					Uart1.TxBuffer[7] = 0x00;
+					work_fault.BIT7 = 0x01;
+					CLOSE_RELAY7;
+				}
+			}
+			t2_count_ms[T2_COUNTER_S_300] = 0;
+		}
 	}
 }
 /* USER CODE END 4 */
